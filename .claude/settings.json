@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "cd \"d:/AI/ClipboardHistory\" && venv/Scripts/python -m py_compile src/*.py tests/*.py 2>&1 || (echo '{\"continue\":false,\"systemMessage\":\"代码语法错误，提交已取消。请先修复代码再提交。\"}' && exit 2)",
+            "statusMessage": "检查代码语法..."
+          }
+        ]
+      }
+    ]
+  }
+}
