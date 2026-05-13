@@ -15,15 +15,8 @@ class DataManager:
     def __init__(self):
         from src.paths import get_db_path
         self.db = Database(get_db_path())
-        self._retention_days = 3  # 默认3天
-        self._next_image_id = self._get_next_id()
-
-    def _get_next_id(self):
-        """预估下一个可用 ID"""
-        items = self.db.get_all_items()
-        if items:
-            return max(item['id'] for item in items) + 1
-        return 1
+        self._retention_days = 3
+        self._last_image_hash = None
 
     def set_retention_days(self, days):
         """设置存储期限"""
@@ -40,48 +33,58 @@ class DataManager:
 
     def add_text(self, text):
         """添加文字记录，自动去重"""
-        # 检查是否与最后一条文字记录相同
-        items = self.db.get_all_items()
-        if items:
-            last = items[0]
-            if last['content_type'] == 'text' and last['text_content'] == text:
-                return None  # 重复内容，跳过
+        try:
+            items = self.db.get_all_items()
+            if items:
+                last = items[0]
+                if last['content_type'] == 'text' and last['text_content'] == text:
+                    return None
+        except Exception as e:
+            raise RuntimeError(f"查询最后一条记录失败: {e}") from e
 
-        item_id = self.db.add_item('text', text_content=text)
+        try:
+            item_id = self.db.add_item('text', text_content=text)
+        except Exception as e:
+            raise RuntimeError(f"文字记录入库失败: {e}") from e
+
         self._update_expired_flags()
         return item_id
 
     def add_image(self, qimage):
-        """添加图片记录，自动去重"""
-        # 检查是否与最后一条图片记录相同（通过 hash）
-        current_hash = qimage.cacheKey()
-        items = self.db.get_all_items()
-        if items:
-            last = items[0]
-            if last['content_type'] == 'image':
-                # 简单去重：比较 cacheKey
-                if hasattr(self, '_last_image_hash') and self._last_image_hash == current_hash:
-                    return None
+        """添加图片记录，通过 MD5 内容去重"""
+        import hashlib
+        from PyQt5.QtCore import QBuffer, QIODevice
 
-        self._last_image_hash = current_hash
+        # 计算图片内容 MD5
+        buf = QBuffer()
+        buf.open(QIODevice.ReadWrite)
+        qimage.save(buf, 'PNG')
+        img_hash = hashlib.md5(buf.data()).hexdigest()
 
-        # 先创建记录，获取 id
-        item_id = self.db.add_item('image')
-        # 再保存图片文件
+        # 与上一条图片记录比较，去重
+        if self._last_image_hash == img_hash:
+            return None
+        self._last_image_hash = img_hash
+
+        # 先存图片文件，再入库（避免入库后存图失败产生脏记录）
         try:
-            image_path, thumb_path = save_image_from_qimage(qimage, item_id)
-            # 更新记录中的路径
-            conn = self.db._get_conn()
-            conn.execute(
-                "UPDATE clipboard_items SET image_path = ?, thumbnail_path = ? WHERE id = ?",
-                (image_path, thumb_path, item_id)
-            )
-            conn.commit()
-            conn.close()
+            from src.paths import get_images_dir, get_thumbnails_dir
+            temp_id = img_hash[:8]  # 临时用 hash 前 8 位做文件名
+            image_path, thumb_path = save_image_from_qimage(qimage, temp_id)
         except Exception as e:
-            # 图片保存失败，删除记录
-            self.db.delete_item(item_id)
-            raise e
+            raise RuntimeError(f"图片保存失败: {e}") from e
+
+        try:
+            item_id = self.db.add_item('image', image_path=image_path, thumbnail_path=thumb_path)
+        except Exception as e:
+            # 入库失败则删除已保存的文件
+            for p in (image_path, thumb_path):
+                if p and os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            raise RuntimeError(f"图片记录入库失败: {e}") from e
 
         self._update_expired_flags()
         return item_id

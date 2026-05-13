@@ -238,11 +238,21 @@ class MainWindow(QMainWindow):
     # ===== 复制反馈 =====
 
     def _show_copy_toast(self):
+        self.copy_toast.setStyleSheet('')  # 重置为 QSS 定义的样式
         self.copy_toast.setText('✅ 已复制到剪贴板!')
         self._toast_timer.start(2000)
 
     def _clear_toast(self):
+        self.copy_toast.setStyleSheet('')
         self.copy_toast.setText('')
+
+    def _show_error(self, msg):
+        """在底部状态栏显示错误信息"""
+        self.copy_toast.setStyleSheet(
+            f'font-size: {self._font_size - 4}px; color: #FF4444; font-weight: bold; padding: 8px 20px;'
+        )
+        self.copy_toast.setText(f'❌ {msg}')
+        self._toast_timer.start(4000)  # 错误信息显示更长
 
     # ===== 数据加载 =====
 
@@ -395,7 +405,7 @@ class MainWindow(QMainWindow):
             if result is not None:
                 self._load_items()
         except Exception as e:
-            print(f'保存文字失败: {e}')
+            self._show_error(f'保存文字失败: {e}')
 
     def _on_image_copied(self, qimage):
         try:
@@ -403,7 +413,7 @@ class MainWindow(QMainWindow):
             if result is not None:
                 self._load_items()
         except Exception as e:
-            print(f'保存图片失败: {e}')
+            self._show_error(f'保存图片失败: {e}')
 
     # ===== 卡片操作 =====
 
@@ -416,37 +426,43 @@ class MainWindow(QMainWindow):
         self._do_copy(item_id)
 
     def _do_copy(self, item_id):
-        item = self.data_manager.get_item_by_id(item_id)
-        if not item:
-            return
+        try:
+            item = self.data_manager.get_item_by_id(item_id)
+            if not item:
+                return
 
-        # 抑制剪贴板监听（避免软件自己触发的变化被记录）
-        self.clipboard_monitor.skip_next_change()
+            # 抑制剪贴板监听（避免软件自己触发的变化被记录）
+            self.clipboard_monitor.skip_next_change()
 
-        clipboard = QApplication.clipboard()
-        if item['content_type'] == 'text':
-            clipboard.setText(item['text_content'] or '')
-        elif item['image_path']:
-            import os
-            from PyQt5.QtGui import QPixmap
-            from PyQt5.QtCore import QUrl, QMimeData
-            if os.path.exists(item['image_path']):
+            clipboard = QApplication.clipboard()
+            if item['content_type'] == 'text':
+                clipboard.setText(item['text_content'] or '')
+            elif item['image_path']:
+                import os
+                from PyQt5.QtGui import QPixmap
+                from PyQt5.QtCore import QUrl, QMimeData
+                if not os.path.exists(item['image_path']):
+                    self._show_error('图片文件不存在，可能已被移动或删除')
+                    return
                 pixmap = QPixmap(item['image_path'])
-                if not pixmap.isNull():
-                    # 同时放入图片数据和文件 URL，桌面/文件夹也能粘贴
-                    mime = QMimeData()
-                    mime.setImageData(pixmap.toImage())
-                    mime.setUrls([QUrl.fromLocalFile(
-                        os.path.abspath(item['image_path'])
-                    )])
-                    clipboard.setMimeData(mime)
+                if pixmap.isNull():
+                    self._show_error('图片文件已损坏，无法读取')
+                    return
+                mime = QMimeData()
+                mime.setImageData(pixmap.toImage())
+                mime.setUrls([QUrl.fromLocalFile(
+                    os.path.abspath(item['image_path'])
+                )])
+                clipboard.setMimeData(mime)
 
-        # 卡片高亮闪烁
-        if item_id in self._card_widgets:
-            self._card_widgets[item_id].flash_highlight()
+            # 卡片高亮闪烁
+            if item_id in self._card_widgets:
+                self._card_widgets[item_id].flash_highlight()
 
-        # 显示复制成功反馈
-        self._show_copy_toast()
+            # 显示复制成功反馈
+            self._show_copy_toast()
+        except Exception as e:
+            self._show_error(f'复制失败: {e}')
 
     def _on_toggle_pin(self, item_id):
         self.data_manager.toggle_pin(item_id)

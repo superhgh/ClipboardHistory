@@ -39,7 +39,14 @@ class ClipboardMonitor(QObject):
         self._suppress_next = True
 
     def _poll(self):
-        """定时检查剪贴板内容"""
+        """定时检查剪贴板内容（外层捕获异常防止定时器静默死亡）"""
+        try:
+            self._do_poll()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    def _do_poll(self):
         if not self._enabled:
             return
 
@@ -116,20 +123,26 @@ class ClipboardMonitor(QObject):
         html = mime.html()
         if html and '<img' in html:
             import re
-            src_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html)
-            if src_match:
-                src = src_match.group(1)
-                if not src.startswith('http'):
-                    img = QImage(src)
-                    if not img.isNull():
-                        return img
+            try:
+                src_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html)
+                if src_match:
+                    src = src_match.group(1)
+                    if not src.startswith('http'):
+                        img = QImage(src)
+                        if not img.isNull():
+                            return img
+            except Exception:
+                pass  # HTML 解析失败，继续尝试其他方式
 
         if mime.hasUrls():
             for url in mime.urls():
-                path = url.toLocalFile()
-                if path:
-                    img = QImage(path)
-                    if not img.isNull():
-                        return img
+                try:
+                    path = url.toLocalFile()
+                    if path:
+                        img = QImage(path)
+                        if not img.isNull():
+                            return img
+                except Exception:
+                    continue
 
         return None
