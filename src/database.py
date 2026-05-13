@@ -12,7 +12,10 @@ class Database:
         if db_path is None:
             from src.paths import get_db_path
             db_path = get_db_path()
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        try:
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        except OSError as e:
+            raise RuntimeError(f"无法创建数据库目录: {e}") from e
         self.db_path = db_path
         self._init_db()
 
