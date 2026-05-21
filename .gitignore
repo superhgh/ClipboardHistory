@@ -22,3 +22,7 @@ logs/error.log
 
 # 环境变量
 .env
+
+# 技能文件（全局安装，项目内不需要）
+.agents/
+skills-lock.json
